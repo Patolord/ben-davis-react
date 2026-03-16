@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { CONVEX_PRIVATE_BRIDGE_KEY } from '$env/static/private';
+const CONVEX_PRIVATE_BRIDGE_KEY = process.env.CONVEX_PRIVATE_BRIDGE_KEY!;
 import { ConvexHttpClient } from 'convex/browser';
 import { Data, Layer, ServiceMap } from 'effect';
 import * as Effect from 'effect/Effect';

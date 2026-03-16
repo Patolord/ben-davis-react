@@ -1,8 +1,9 @@
-import { CLERK_SECRET_KEY } from '$env/static/private';
-import { PUBLIC_CLERK_PUBLISHABLE_KEY } from '$env/static/public';
 import { createClerkClient, type User } from '@clerk/backend';
-import type { RequestEvent } from '@sveltejs/kit';
+import { auth as getAuth, currentUser as getCurrentUser } from '@clerk/nextjs/server';
 import { Data, Effect, Layer, ServiceMap } from 'effect';
+
+const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY!;
+const PUBLIC_CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
 export class ClerkError extends Data.TaggedError('ClerkError')<{
 	readonly message: string;
@@ -13,7 +14,7 @@ export class ClerkError extends Data.TaggedError('ClerkError')<{
 }> {}
 
 interface ClerkDef {
-	validateAuth: (event: RequestEvent) => Effect.Effect<User, ClerkError>;
+	validateAuth: () => Effect.Effect<User, ClerkError>;
 }
 
 export class ClerkService extends ServiceMap.Service<ClerkService, ClerkDef>()('ClerkService') {
@@ -23,12 +24,10 @@ export class ClerkService extends ServiceMap.Service<ClerkService, ClerkDef>()('
 			publishableKey: PUBLIC_CLERK_PUBLISHABLE_KEY
 		});
 
-		const validateAuth = (event: RequestEvent) =>
+		const validateAuth = () =>
 			Effect.gen(function* () {
-				const { request } = event;
-
-				const auth = yield* Effect.tryPromise({
-					try: () => clerk.authenticateRequest(request).then((state) => state.toAuth()),
+				const user = yield* Effect.tryPromise({
+					try: () => getCurrentUser(),
 					catch: (e) =>
 						new ClerkError({
 							message: e instanceof Error ? e.message : 'Unknown error',
@@ -39,7 +38,7 @@ export class ClerkService extends ServiceMap.Service<ClerkService, ClerkDef>()('
 						})
 				});
 
-				if (!auth || !auth.isAuthenticated) {
+				if (!user) {
 					return yield* Effect.fail(
 						new ClerkError({
 							message: 'Unauthorized',
@@ -51,19 +50,7 @@ export class ClerkService extends ServiceMap.Service<ClerkService, ClerkDef>()('
 					);
 				}
 
-				const user = yield* Effect.tryPromise({
-					try: () => clerk.users.getUser(auth.userId),
-					catch: (e) =>
-						new ClerkError({
-							message: e instanceof Error ? e.message : 'Unknown error',
-							kind: 'AuthenticationError',
-							traceId: crypto.randomUUID(),
-							timestamp: Date.now(),
-							cause: e
-						})
-				});
-
-				return user;
+				return user as unknown as User;
 			});
 
 		return {

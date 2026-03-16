@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from 'effect';
 import { NodeServices } from '@effect/platform-node';
-import { error } from '@sveltejs/kit';
 import { ConvexError, ConvexPrivateService } from './services/convex';
 import { ClerkError, ClerkService } from './services/clerk';
 
@@ -58,23 +57,32 @@ const serializeUnknown = (value: unknown): unknown => {
 		return value;
 	}
 
-	try {
-		return JSON.parse(JSON.stringify(value));
-	} catch {
-		return String(value);
+	if (value && typeof value === 'object' && 'toString' in value) {
+		try {
+			return JSON.parse(JSON.stringify(value));
+		} catch {
+			return String(value);
+		}
 	}
+	return String(value);
+};
+
+export type PublicError = {
+	message: string;
+	kind: string;
+	timestamp: number;
+	traceId: string;
+	status: number;
 };
 
 const toPublicError = (
-	errorValue: Pick<
-		GenericError | ConvexError | ClerkError,
-		'message' | 'kind' | 'timestamp' | 'traceId'
-	>
-) => ({
+	errorValue: GenericError | ConvexError | ClerkError
+): PublicError => ({
 	message: errorValue.message,
 	kind: errorValue.kind,
 	timestamp: errorValue.timestamp,
-	traceId: errorValue.traceId
+	traceId: errorValue.traceId,
+	status: errorValue instanceof GenericError ? errorValue.status : (errorValue instanceof ClerkError ? 401 : 500)
 });
 
 const logTaggedError = (errorValue: GenericError | ConvexError | ClerkError) => {
@@ -121,7 +129,7 @@ export const effectRunner = async <T>(
 		GenericError | ConvexError | ClerkError,
 		NodeServices.NodeServices | ConvexPrivateService | ClerkService
 	>
-) => {
+): Promise<{ data: T; error: null } | { data: null; error: PublicError }> => {
 	const exit = await runtime.runPromiseExit(effect);
 
 	if (Exit.isFailure(exit)) {
@@ -155,16 +163,12 @@ export const effectRunner = async <T>(
 		// send down the first error to the client
 		const firstError = Cause.findErrorOption(cause);
 		if (firstError._tag === 'Some') {
-			if (firstError.value instanceof ConvexError) {
-				return error(500, toPublicError(firstError.value));
-			}
-
-			if (firstError.value instanceof ClerkError) {
-				return error(401, toPublicError(firstError.value));
-			}
-
-			if (firstError.value instanceof GenericError) {
-				return error(firstError.value.status, toPublicError(firstError.value));
+			if (
+				firstError.value instanceof ConvexError ||
+				firstError.value instanceof ClerkError ||
+				firstError.value instanceof GenericError
+			) {
+				return { data: null, error: toPublicError(firstError.value) };
 			}
 		}
 
@@ -177,8 +181,8 @@ export const effectRunner = async <T>(
 
 		logTaggedError(unknownError);
 
-		return error(unknownError.status, toPublicError(unknownError));
+		return { data: null, error: toPublicError(unknownError) };
 	}
 
-	return exit.value;
+	return { data: exit.value, error: null };
 };

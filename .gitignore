@@ -1,8 +1,5 @@
 node_modules
-
-.convex
-
-# Output
+.next
 .output
 .vercel
 .netlify
